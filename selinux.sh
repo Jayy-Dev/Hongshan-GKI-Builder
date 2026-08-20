@@ -34,26 +34,3 @@ ksu_allow(db, "untrusted_app", "gpu_device", "chr_file", "write");\n\
 ksu_allow(db, "untrusted_app", "gpu_device", "chr_file", "open");\n\
 ksu_allow(db, "untrusted_app", "gpu_device", "chr_file", "ioctl");\n\
 ksu_allow(db, "untrusted_app", "gpu_device", "chr_file", "map");\n'
-
-# ---------------------------------------------------------------------------
-# Selene - game detection reads /proc/<pid>/cmdline + /data/misc/selene list
-# ---------------------------------------------------------------------------
-inject_selinux "Selene" \
-' ksu_allow(db, "kernel", "proc_pid_cmdline", "file", "read");\n\
-ksu_allow(db, "kernel", "proc_pid_cmdline", "file", "open");\n\
-ksu_allow(db, "kernel", "proc_pid_cmdline", "file", "getattr");\n\
-ksu_allow(db, "kernel", "misc_file", "dir", "search");\n\
-ksu_allow(db, "kernel", "misc_file", "file", "read");\n\
-ksu_allow(db, "kernel", "misc_file", "file", "open");\n\
-ksu_allow(db, "kernel", "misc_file", "file", "getattr");\n'
-
-# ---------------------------------------------------------------------------
-# Zenith - tunable dir under /sys/devices/system/cpu/cpufreq (sysfs_devices_system_cpu)
-# ---------------------------------------------------------------------------
-inject_selinux "Zenith cpufreq sysfs" \
-' ksu_allow(db, "kernel", "sysfs_devices_system_cpu", "dir", "search");\n\
-ksu_allow(db, "kernel", "sysfs_devices_system_cpu", "dir", "getattr");\n\
-ksu_allow(db, "kernel", "sysfs_devices_system_cpu", "file", "read");\n\
-ksu_allow(db, "kernel", "sysfs_devices_system_cpu", "file", "write");\n\
-ksu_allow(db, "kernel", "sysfs_devices_system_cpu", "file", "open");\n\
-ksu_allow(db, "kernel", "sysfs_devices_system_cpu", "file", "getattr");\n'
