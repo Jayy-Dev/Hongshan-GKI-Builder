@@ -11,8 +11,8 @@ trap 'echo "Build failed at line $LINENO. Exit code: $?" >&2' ERR
 export ARCH=arm64
 export LLVM=1
 export LLVM_IAS=1
-export KBUILD_BUILD_USER="GrayRavens-Team"
-export KBUILD_BUILD_HOST="Zenithed-V15-Akari"
+export KBUILD_BUILD_USER="RiniX-HAS"
+export KBUILD_BUILD_HOST="Liino-Talos-II"
 
 # ── Clang toolchain ──────────────────────────────────────────────────────────
 if [ -z "$CLANG_PATH" ]; then
