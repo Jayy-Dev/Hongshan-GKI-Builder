@@ -1,0 +1,212 @@
+name: Build Kernel
+
+on:
+  workflow_dispatch:
+    inputs:
+      ksu_variant:
+        description: 'KernelSU variant (ALL = KWS + KSUN + VNL)'
+        type: choice
+        options:
+          - KWS
+          - KSUN
+          - VNL
+          - ALL
+        default: KWS
+      kernel_name:
+        description: 'Kernel base name'
+        type: string
+        default: Liino-RiniX
+      kernel_ref:
+        description: 'kernel branch / tag / SHA to build'
+        type: string
+        default: android16-6.12-lts
+      susfs_branch:
+        description: 'SUSFS kernel patch branch (gki-android12-5.10 / gki-android16-6.12 ...)'
+        type: string
+        default: gki-android16-6.12
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    outputs:
+      ksu_variants: ${{ steps.resolve.outputs.ksu_variants }}
+    steps:
+      - name: Resolve variants
+        id: resolve
+        run: |
+          if [ "${{ inputs.ksu_variant }}" = "ALL" ]; then
+            echo 'ksu_variants=["KWS","KSUN","VNL"]' >> "$GITHUB_OUTPUT"
+          else
+            echo 'ksu_variants=["${{ inputs.ksu_variant }}"]' >> "$GITHUB_OUTPUT"
+          fi
+
+  build:
+    name: Build (${{ matrix.ksu }})
+    needs: setup
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        ksu: ${{ fromJson(needs.setup.outputs.ksu_variants) }}
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v3
+  
+    - name: Clean-Up
+      run: rokibhasansagar/slimhub_actions@main
+
+    - name: Swap Space
+      uses: pierotofy/set-swap-space@master
+      with:
+        swap-size-gb: 24
+
+    - name: Install build dependencies
+      run: |
+        sudo apt-get update -q
+        sudo apt-get install -y --no-install-recommends \
+          bc bison flex build-essential libssl-dev libelf-dev \
+          cpio kmod rsync zip patch curl ca-certificates \
+          python3 python3-pip python3-lxml git wget binutils zstd \
+          pahole
+
+    - name: Install Repo Tool
+      run: |
+        mkdir -p ~/.bin \
+        PATH="${HOME}/.bin:${PATH}"
+        curl https://storage.googleapis.com/git-repo-downloads/repo > ~/.bin/repo
+        chmod a+rx ~/.bin/repo
+  
+    - name: Configure Git
+      run: |
+        git config --global user.name "RiniX"
+        git config --global user.email "amethrin.gh@gmail.com"
+
+    - name: Sync GKI Source
+      run: |
+        mkdir kernel && cd kernel
+        repo init -u https://android.googlesource.com/kernel/manifest -b ${{ inputs.kernel_ref }} --depth=1
+        repo sync -c -j$(nproc --all) --no-tags --no-clone-bundle
+        
+    - name: Apply KernelSU
+      if: matrix.ksu != 'VNL'
+      working-directory: kernel
+      run: |
+        if [ "${{ matrix.ksu }}" = "KWS" ]; then
+          curl -LSs "https://raw.githubusercontent.com/KOWX712/KernelSU/main/kernel/setup.sh" | bash -s master
+          printf '\nCONFIG_KSU=y\nCONFIG_KSU_MANUAL_SU=n\nCONFIG_KSU_SUSFS=n\n' >> arch/arm64/configs/gki_defconfig
+        else
+          curl -LSs "https://raw.githubusercontent.com/pershoot/KernelSU-Next/dev-susfs/kernel/setup.sh" | bash -s dev-susfs
+          printf '\nCONFIG_KSU=y\nCONFIG_KSU_MANUAL_SU=n\nCONFIG_KSU_SUSFS=y\n' >> arch/arm64/configs/gki_defconfig
+        fi
+
+    - name: Apply SUSFS patches (KSUN only)
+      if: matrix.ksu == 'KSUN'
+      working-directory: kernel
+      run: |
+        SUSFS_BRANCH="${{ inputs.susfs_branch }}"
+        git clone https://gitlab.com/simonpunk/susfs4ksu/ -b "${SUSFS_BRANCH}" sus
+        rm -rf sus/.git
+        susfs=sus/kernel_patches
+        cp -r "$susfs/fs" .
+        cp -r "$susfs/include" .
+        PATCH_FILE="$susfs/50_add_susfs_in_${SUSFS_BRANCH}.patch"
+        if [ ! -f "$PATCH_FILE" ]; then
+          echo "FATAL: patch $PATCH_FILE not found in susfs4ksu ${SUSFS_BRANCH}"
+          exit 1
+        fi
+        cp "$PATCH_FILE" .
+        patch -p1 < "$(basename "$PATCH_FILE")" || true
+
+        # 5.15.211 base fixup: the ACK tree carries vendor-hook includes
+        # (trace/hooks/blk.h in fs/namespace.c, trace/hooks/mm.h in
+        # fs/proc/task_mmu.c) that the upstream gki-android13-5.15 patch
+        # does not expect, so its FIRST hunk in each of those files rejects
+        # and they end up missing the susfs_def.h include (and, for
+        # namespace.c, the susfs externs/CL_COPY_MNT_NS define).  All other
+        # hunks apply cleanly.  Add the missing pieces deterministically;
+        # every insert is grep-guarded so an upstream patch fix is a no-op.
+        if [[ "${{ inputs.susfs_branch }}" == gki-android13-5.15* ]]; then
+          if ! grep -q '^#include <trace/hooks/blk.h>' fs/namespace.c || \
+             ! grep -q '^#include <trace/hooks/mm.h>' fs/proc/task_mmu.c; then
+            echo "FATAL: 5.15.211 SUSFS fixup: expected ACK vendor-hook includes missing"
+            exit 1
+          fi
+          if ! grep -q '^#include <linux/susfs_def.h>' fs/namespace.c; then
+            awk '/^#include <linux\/mnt_idmapping.h>$/{print; print "#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT"; print "#include <linux/susfs_def.h>"; print "#endif // #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT"; next} {print}' fs/namespace.c > fs/namespace.c.tmp && mv fs/namespace.c.tmp fs/namespace.c
+          fi
+          if ! grep -q '^extern bool susfs_is_current_ksu_domain' fs/namespace.c; then
+            awk '/^#include "internal.h"$/{print; print "#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT"; print "extern bool susfs_is_current_ksu_domain(void);"; print "extern struct static_key_true susfs_is_sdcard_android_data_not_decrypted;"; print ""; print "#define CL_COPY_MNT_NS BIT(25) /* used by copy_mnt_ns() */"; print ""; print "#endif // #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT"; next} {print}' fs/namespace.c > fs/namespace.c.tmp && mv fs/namespace.c.tmp fs/namespace.c
+          fi
+          if ! grep -q '^#include <linux/susfs_def.h>' fs/proc/task_mmu.c; then
+            awk '/^#include <linux\/pkeys.h>$/{print; print "#if defined(CONFIG_KSU_SUSFS_SUS_KSTAT) || defined(CONFIG_KSU_SUSFS_SUS_MAP) || defined(CONFIG_KSU_SUSFS_OPEN_REDIRECT)"; print "#include <linux/susfs_def.h>"; print "#endif // #if defined(CONFIG_KSU_SUSFS_SUS_KSTAT) || defined(CONFIG_KSU_SUSFS_SUS_MAP) || defined(CONFIG_KSU_SUSFS_OPEN_REDIRECT)"; next} {print}' fs/proc/task_mmu.c > fs/proc/task_mmu.c.tmp && mv fs/proc/task_mmu.c.tmp fs/proc/task_mmu.c
+          fi
+          echo "susfs: applied 5.15.211 missing-hunk fixup (susfs_def.h + externs)"
+        fi
+
+        # Post-apply verification for 5.15: the susfs code must have its
+        # declarations (bootconfig.c rejection is expected - kaguya covers it).
+        if [[ "${{ inputs.susfs_branch }}" == gki-android13-5.15* ]]; then
+          if ! grep -q 'susfs_is_sdcard_android_data_not_decrypted' fs/namespace.c || \
+             ! grep -q 'susfs_open_redirect_spoof_show_map_vma_srcu' fs/proc/task_mmu.c || \
+             ! grep -q '^#include <linux/susfs_def.h>' fs/proc/task_mmu.c; then
+            echo "FATAL: SUSFS 5.15 namespace/task_mmu pieces missing after fixup"
+            exit 1
+          fi
+        fi
+
+        # A failed hunk in fs/proc/bootconfig.c is EXPECTED: kaguya's
+        # in-tree bootconfig spoof rewrote that file, so the SUSFS
+        # SPOOF_CMDLINE_OR_BOOTCONFIG hunk rejects (.rej).  kaguya
+        # covers the same surface, so it is harmless.  But the
+        # fs/namei.c OPEN_REDIRECT hunks are essential - fail hard
+        # if they did not apply.
+        #
+        # set_nameidata() signature differs between 5.10 (3-arg) and
+        # 5.15+ (native 4-arg).  The sed workaround is 5.10-ONLY; on
+        # android13-5.15 the susfs patch targets the 4-arg form natively
+        # and must be left untouched.
+        if [[ "${{ inputs.susfs_branch }}" == gki-android12-5.10* ]]; then
+          if grep -q 'set_nameidata(nd, old_dfd, fake_filename, NULL);' fs/namei.c; then
+            sed -i 's/set_nameidata(nd, old_dfd, fake_filename, NULL);/set_nameidata(nd, old_dfd, fake_filename);/' fs/namei.c
+            echo "susfs: applied set_nameidata() 3-arg workaround (dropped ', NULL')"
+          elif grep -q 'set_nameidata(nd, old_dfd, fake_filename);' fs/namei.c; then
+            echo "susfs: upstream patch already uses 3-arg set_nameidata() - no workaround needed"
+          else
+            echo "FATAL: SUSFS fs/namei.c OPEN_REDIRECT hunks did not apply"
+            exit 1
+          fi
+        else
+          if ! grep -q 'set_nameidata(nd, old_dfd, fake_filename' fs/namei.c; then
+            echo "FATAL: SUSFS fs/namei.c OPEN_REDIRECT hunks did not apply"
+            exit 1
+          fi
+          echo "susfs: native 4-arg set_nameidata() present (5.15+) - no workaround needed"
+        fi
+
+    - name: Set LOCALVERSION
+      working-directory: kernel
+      run: |
+        # Cap LOCALVERSION so the release string (5.15.211 + localver +
+        # -g<SHA>[-dirty]) stays under the kernel's 64-char utsrelease
+        # limit.  Full branding lives in the zip name / kernel.string.
+        KN="$(echo "${{ inputs.kernel_name }}" | cut -c1-24 | sed 's/-$//')"
+        LOCALVER="-${KN}-${{ matrix.ksu }}"
+        printf '\nCONFIG_LOCALVERSION="%s"\n' "$LOCALVER" >> arch/arm64/configs/gki_defconfig
+
+    - name: Build GKI (Bazel/Kleaf)
+      run: |
+        cd kernel \
+        tools/bazel run //common:kernel_aarch64_dist
+
+    - name: Upload GKI Artifacts
+      uses: softprops/action-gh-release@v1
+      with:
+        files: |
+          kernel/out/kernel_aarach64/dist/Image
+          kernel/out/kernel_aarach64/dist/*.ko
+        name: GKI Android16-6.12
+        tag_name: ${{ github.run_id }}
+        body: |
+          I like custom
+
+  
