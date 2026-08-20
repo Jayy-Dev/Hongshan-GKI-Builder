@@ -52,11 +52,6 @@ jobs:
     - name: Checkout
       uses: actions/checkout@v3
 
-    - name: Swap Space
-      uses: pierotofy/set-swap-space@master
-      with:
-        swap-size-gb: 24
-
     - name: Install build dependencies
       run: |
         sudo apt-get update -q
