@@ -1,0 +1,256 @@
+name: Build kernel
+
+on:
+  workflow_dispatch:
+    inputs:
+      ksu_variant:
+        description: 'KernelSU variant (ALL = KWS + KSUN + VNL)'
+        type: choice
+        options:
+          - KWS
+          - KSUN
+          - VNL
+          - ALL
+        default: KWS
+      clang_variant:
+        description: 'Clang toolchain Selection'
+        type: choice
+        options:
+          - CLANG-19
+          - CLANG-12
+          - ALL
+        default: CLANG-19
+      kernel_name:
+        description: 'Kernel base name'
+        type: string
+        default: GrayRavens-Zenithed
+      kernel_ref:
+        description: 'kernel branch / tag / SHA to build'
+        type: string
+        default: android12-5.10-experimental
+      kernel_repo:
+        description: 'Kernel repository (owner/repo) to build'
+        type: string
+        default: XTENSEI/kernel_common_5.10
+      susfs_branch:
+        description: 'SUSFS kernel patch branch (gki-android12-5.10 / gki-android13-5.15 ...)'
+        type: string
+        default: gki-android12-5.10
+      anykernel_branch:
+        description: 'AnyKernel3 installer branch (android12-5.10 = 5.10 / android13-5.15 = 5.15)'
+        type: string
+        default: android12-5.10
+      kmi_symbol_check:
+        description: 'Run KMI symbol validation'
+        type: boolean
+        default: true
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    outputs:
+      ksu_variants: ${{ steps.resolve.outputs.ksu_variants }}
+      clang_variants: ${{ steps.resolve.outputs.clang_variants }}
+    steps:
+      - name: Resolve variants
+        id: resolve
+        run: |
+          if [ "${{ inputs.ksu_variant }}" = "ALL" ]; then
+            echo 'ksu_variants=["KWS","KSUN","VNL"]' >> "$GITHUB_OUTPUT"
+          else
+            echo 'ksu_variants=["${{ inputs.ksu_variant }}"]' >> "$GITHUB_OUTPUT"
+          fi
+          # 5.15 kernel line only supports CLANG-19: the older CLANG-12
+          # toolchain produces a __stack_chk_fail KMI CRC mismatch against
+          # the ABI XML (toolchain-era artifact, not a real ABI break).
+          if [[ "${{ inputs.kernel_repo }}" == *5.15* ]] && [ "${{ inputs.clang_variant }}" != "CLANG-19" ]; then
+            echo "::warning::5.15 kernel line: CLANG-12 fails KMI on __stack_chk_fail; forcing CLANG-19"
+            echo 'clang_variants=["CLANG-19"]' >> "$GITHUB_OUTPUT"
+          elif [ "${{ inputs.clang_variant }}" = "ALL" ]; then
+            echo 'clang_variants=["CLANG-19","CLANG-12"]' >> "$GITHUB_OUTPUT"
+          else
+            echo 'clang_variants=["${{ inputs.clang_variant }}"]' >> "$GITHUB_OUTPUT"
+          fi
+
+  build:
+    name: Build (${{ matrix.ksu }} / ${{ matrix.clang }})
+    needs: setup
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        ksu: ${{ fromJson(needs.setup.outputs.ksu_variants) }}
+        clang: ${{ fromJson(needs.setup.outputs.clang_variants) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y --no-install-recommends \
+            bc bison flex build-essential libssl-dev libelf-dev \
+            cpio kmod rsync zip patch curl ca-certificates \
+            python3 python3-pip python3-lxml git wget binutils zstd \
+            pahole
+
+      - name: Download Clang 19
+        if: matrix.clang == 'CLANG-19'
+        run: |
+          git clone --depth=1 https://gitlab.com/crdroidandroid/android_prebuilts_clang_host_linux-x86_clang-r536225.git ~/toolchain/aosp-r536225
+
+      - name: Cache AOSP Clang r416183b
+        if: matrix.clang == 'CLANG-12'
+        id: cache-aosp-12
+        uses: actions/cache@v4
+        with:
+          path: ~/toolchain/aosp-clang-r416183b
+          key: aosp-clang-r416183b-x86_64
+
+      - name: Download AOSP Clang r416183b
+        if: matrix.clang == 'CLANG-12' && steps.cache-aosp-12.outputs.cache-hit != 'true'
+        run: |
+          git clone --depth=1 https://github.com/LineageOS/android_prebuilts_clang_kernel_linux-x86_clang-r416183b.git ~/toolchain/aosp-clang-r416183b
+
+      - name: Export CLANG_PATH
+        run: |
+          case "${{ matrix.clang }}" in
+            CLANG-19) echo "CLANG_PATH=$HOME/toolchain/aosp-r536225" >> "$GITHUB_ENV" ;;
+            CLANG-12) echo "CLANG_PATH=$HOME/toolchain/aosp-clang-r416183b" >> "$GITHUB_ENV" ;;
+          esac
+
+      - name: Shallow-clone kernel source
+        run: |
+          git clone --depth=1 --branch "${{ inputs.kernel_ref }}" "https://github.com/${{ inputs.kernel_repo }}" kernel
+
+      - name: Apply KernelSU
+        if: matrix.ksu != 'VNL'
+        working-directory: kernel
+        run: |
+          if [ "${{ matrix.ksu }}" = "KWS" ]; then
+            curl -LSs "https://raw.githubusercontent.com/KOWX712/KernelSU/main/kernel/setup.sh" | bash -s master
+            printf '\nCONFIG_KSU=y\nCONFIG_KSU_MANUAL_SU=n\nCONFIG_KSU_SUSFS=n\n' >> arch/arm64/configs/gki_defconfig
+          else
+            curl -LSs "https://raw.githubusercontent.com/pershoot/KernelSU-Next/dev-susfs/kernel/setup.sh" | bash -s dev-susfs
+            printf '\nCONFIG_KSU=y\nCONFIG_KSU_MANUAL_SU=n\nCONFIG_KSU_SUSFS=y\n' >> arch/arm64/configs/gki_defconfig
+          fi
+
+      - name: Apply SUSFS patches (KSUN only)
+        if: matrix.ksu == 'KSUN'
+        working-directory: kernel
+        run: |
+          SUSFS_BRANCH="${{ inputs.susfs_branch }}"
+          git clone https://gitlab.com/simonpunk/susfs4ksu/ -b "${SUSFS_BRANCH}" sus
+          rm -rf sus/.git
+          susfs=sus/kernel_patches
+          cp -r "$susfs/fs" .
+          cp -r "$susfs/include" .
+          PATCH_FILE="$susfs/50_add_susfs_in_${SUSFS_BRANCH}.patch"
+          if [ ! -f "$PATCH_FILE" ]; then
+            echo "FATAL: patch $PATCH_FILE not found in susfs4ksu ${SUSFS_BRANCH}"
+            exit 1
+          fi
+          cp "$PATCH_FILE" .
+          patch -p1 < "$(basename "$PATCH_FILE")" || true
+
+          # 5.15.211 base fixup: the ACK tree carries vendor-hook includes
+          # (trace/hooks/blk.h in fs/namespace.c, trace/hooks/mm.h in
+          # fs/proc/task_mmu.c) that the upstream gki-android13-5.15 patch
+          # does not expect, so its FIRST hunk in each of those files rejects
+          # and they end up missing the susfs_def.h include (and, for
+          # namespace.c, the susfs externs/CL_COPY_MNT_NS define).  All other
+          # hunks apply cleanly.  Add the missing pieces deterministically;
+          # every insert is grep-guarded so an upstream patch fix is a no-op.
+          if [[ "${{ inputs.susfs_branch }}" == gki-android13-5.15* ]]; then
+            if ! grep -q '^#include <trace/hooks/blk.h>' fs/namespace.c || \
+               ! grep -q '^#include <trace/hooks/mm.h>' fs/proc/task_mmu.c; then
+              echo "FATAL: 5.15.211 SUSFS fixup: expected ACK vendor-hook includes missing"
+              exit 1
+            fi
+            if ! grep -q '^#include <linux/susfs_def.h>' fs/namespace.c; then
+              awk '/^#include <linux\/mnt_idmapping.h>$/{print; print "#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT"; print "#include <linux/susfs_def.h>"; print "#endif // #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT"; next} {print}' fs/namespace.c > fs/namespace.c.tmp && mv fs/namespace.c.tmp fs/namespace.c
+            fi
+            if ! grep -q '^extern bool susfs_is_current_ksu_domain' fs/namespace.c; then
+              awk '/^#include "internal.h"$/{print; print "#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT"; print "extern bool susfs_is_current_ksu_domain(void);"; print "extern struct static_key_true susfs_is_sdcard_android_data_not_decrypted;"; print ""; print "#define CL_COPY_MNT_NS BIT(25) /* used by copy_mnt_ns() */"; print ""; print "#endif // #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT"; next} {print}' fs/namespace.c > fs/namespace.c.tmp && mv fs/namespace.c.tmp fs/namespace.c
+            fi
+            if ! grep -q '^#include <linux/susfs_def.h>' fs/proc/task_mmu.c; then
+              awk '/^#include <linux\/pkeys.h>$/{print; print "#if defined(CONFIG_KSU_SUSFS_SUS_KSTAT) || defined(CONFIG_KSU_SUSFS_SUS_MAP) || defined(CONFIG_KSU_SUSFS_OPEN_REDIRECT)"; print "#include <linux/susfs_def.h>"; print "#endif // #if defined(CONFIG_KSU_SUSFS_SUS_KSTAT) || defined(CONFIG_KSU_SUSFS_SUS_MAP) || defined(CONFIG_KSU_SUSFS_OPEN_REDIRECT)"; next} {print}' fs/proc/task_mmu.c > fs/proc/task_mmu.c.tmp && mv fs/proc/task_mmu.c.tmp fs/proc/task_mmu.c
+            fi
+            echo "susfs: applied 5.15.211 missing-hunk fixup (susfs_def.h + externs)"
+          fi
+
+          # Post-apply verification for 5.15: the susfs code must have its
+          # declarations (bootconfig.c rejection is expected - kaguya covers it).
+          if [[ "${{ inputs.susfs_branch }}" == gki-android13-5.15* ]]; then
+            if ! grep -q 'susfs_is_sdcard_android_data_not_decrypted' fs/namespace.c || \
+               ! grep -q 'susfs_open_redirect_spoof_show_map_vma_srcu' fs/proc/task_mmu.c || \
+               ! grep -q '^#include <linux/susfs_def.h>' fs/proc/task_mmu.c; then
+              echo "FATAL: SUSFS 5.15 namespace/task_mmu pieces missing after fixup"
+              exit 1
+            fi
+          fi
+
+          # A failed hunk in fs/proc/bootconfig.c is EXPECTED: kaguya's
+          # in-tree bootconfig spoof rewrote that file, so the SUSFS
+          # SPOOF_CMDLINE_OR_BOOTCONFIG hunk rejects (.rej).  kaguya
+          # covers the same surface, so it is harmless.  But the
+          # fs/namei.c OPEN_REDIRECT hunks are essential - fail hard
+          # if they did not apply.
+          #
+          # set_nameidata() signature differs between 5.10 (3-arg) and
+          # 5.15+ (native 4-arg).  The sed workaround is 5.10-ONLY; on
+          # android13-5.15 the susfs patch targets the 4-arg form natively
+          # and must be left untouched.
+          if [[ "${{ inputs.susfs_branch }}" == gki-android12-5.10* ]]; then
+            if grep -q 'set_nameidata(nd, old_dfd, fake_filename, NULL);' fs/namei.c; then
+              sed -i 's/set_nameidata(nd, old_dfd, fake_filename, NULL);/set_nameidata(nd, old_dfd, fake_filename);/' fs/namei.c
+              echo "susfs: applied set_nameidata() 3-arg workaround (dropped ', NULL')"
+            elif grep -q 'set_nameidata(nd, old_dfd, fake_filename);' fs/namei.c; then
+              echo "susfs: upstream patch already uses 3-arg set_nameidata() - no workaround needed"
+            else
+              echo "FATAL: SUSFS fs/namei.c OPEN_REDIRECT hunks did not apply"
+              exit 1
+            fi
+          else
+            if ! grep -q 'set_nameidata(nd, old_dfd, fake_filename' fs/namei.c; then
+              echo "FATAL: SUSFS fs/namei.c OPEN_REDIRECT hunks did not apply"
+              exit 1
+            fi
+            echo "susfs: native 4-arg set_nameidata() present (5.15+) - no workaround needed"
+          fi
+
+      - name: Set LOCALVERSION
+        working-directory: kernel
+        run: |
+          # Cap LOCALVERSION so the release string (5.15.211 + localver +
+          # -g<SHA>[-dirty]) stays under the kernel's 64-char utsrelease
+          # limit.  Full branding lives in the zip name / kernel.string.
+          KN="$(echo "${{ inputs.kernel_name }}" | cut -c1-24 | sed 's/-$//')"
+          LOCALVER="-${KN}-${{ matrix.ksu }}"
+          printf '\nCONFIG_LOCALVERSION="%s"\n' "$LOCALVER" >> arch/arm64/configs/gki_defconfig
+
+      - name: Run build.sh
+        working-directory: kernel
+        env:
+          CLANG_PATH: ${{ env.CLANG_PATH }}
+          CLANG_VARIANT: ${{ matrix.clang }}
+          KMI_SYMBOL_CHECK: ${{ inputs.kmi_symbol_check }}
+        run: |
+          cp "$GITHUB_WORKSPACE/build.sh" .
+          chmod +x build.sh
+          ./build.sh
+
+      - name: Package with AnyKernel3
+        run: |
+          ZIP_NAME="${{ inputs.kernel_name }}-${{ matrix.ksu }}-${{ matrix.clang }}"
+          echo "ZIP_NAME=$ZIP_NAME" >> "$GITHUB_ENV"
+          git clone --depth=1 --branch ${{ inputs.anykernel_branch }} https://github.com/XTENSEI/GrayRavens-anykernel anykernel
+          cp kernel/out/arch/arm64/boot/Image anykernel/Image
+          cd anykernel
+          zip -r9 "../${ZIP_NAME}.zip" . --exclude="*.git*" --exclude="README.md" --exclude="*.placeholder"
+
+      - name: Upload flashable zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ZIP_NAME }}
+          path: ${{ env.ZIP_NAME }}.zip
