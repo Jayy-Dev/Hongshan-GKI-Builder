@@ -55,8 +55,8 @@ jobs:
     - name: Maximize build disk space
       uses: easimon/maximize-build-space@v10
       with:
-        root-reserve-mb: 8192
-        temp-reserve-mb: 4096
+        root-reserve-mb: 4096
+        temp-reserve-mb: 1024
         
         remove-dotnet: true
         remove-android: true
@@ -89,8 +89,7 @@ jobs:
     - name: Sync GKI Source
       run: |
         mkdir kernel && cd kernel
-        repo init -u https://android.googlesource.com/kernel/manifest -b common-${{ inputs.kernel_ref }} --depth=1
-        repo sync -c -j$(nproc --all) --no-tags --no-clone-bundle
+        repo init -u https://android.googlesource.com/kernel/manifest -b common-${{ inputs.kernel_ref }} --depth=1 --groups=default,-mips,-x86,-riscv repo sync -c -j$(nproc --all) --no-tags --no-clone-bundle
         
     - name: Apply KernelSU
       if: matrix.ksu != 'VNL'
