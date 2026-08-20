@@ -77,7 +77,7 @@ jobs:
     - name: Sync GKI Source
       run: |
         mkdir kernel && cd kernel
-        repo init -u https://android.googlesource.com/kernel/manifest -b ${{ inputs.kernel_ref }} --depth=1
+        repo init -u https://android.googlesource.com/kernel/manifest -b common-${{ inputs.kernel_ref }} --depth=1
         repo sync -c -j$(nproc --all) --no-tags --no-clone-bundle
         
     - name: Apply KernelSU
