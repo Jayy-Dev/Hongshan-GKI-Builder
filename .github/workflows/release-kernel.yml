@@ -27,7 +27,7 @@ on:
 
 jobs:
   setup:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-slim
     outputs:
       ksu_variants: ${{ steps.resolve.outputs.ksu_variants }}
     steps:
