@@ -144,7 +144,7 @@ jobs:
 
     - name: Build GKI (Bazel/Kleaf)
       run: |
-        tools/bazel run --config=fast --defconfig_fragment=//common/user_flags.fragment //common:kernel_aarch64_dist
+        tools/bazel run --config=fast --defconfig_fragment=common/user_flags.fragment //common:kernel_aarch64_dist
 
     - name: Upload GKI Artifacts
       uses: softprops/action-gh-release@v1
