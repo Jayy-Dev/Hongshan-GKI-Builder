@@ -28,6 +28,9 @@ on:
 jobs:
   setup:
     runs-on: ubuntu-latest
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    permissions: write-all
     outputs:
       ksu_variants: ${{ steps.resolve.outputs.ksu_variants }}
     steps:
