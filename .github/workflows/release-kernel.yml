@@ -204,7 +204,7 @@ jobs:
         tools/bazel run //common:kernel_aarch64_dist
 
     - name: Upload GKI Artifacts
-      uses: softprops/action-gh-releave@v1
+      uses: softprops/action-gh-release@v1
       with:
         files: |
           kernel/out/kernel_aarach64/dist/Image
