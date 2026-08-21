@@ -172,9 +172,21 @@ jobs:
         LOCALVER="-${KN}-${{ matrix.ksu }}"
         printf '\nCONFIG_LOCALVERSION="%s"\n' "$LOCALVER" >> user_flags.fragment
 
+    - name: Define Kernel Fragment
+      working-directory: common
+      run: |
+        cat << 'EOF' >> BUILD.bazel
+
+        filegroup(
+            name = "user_flags_target",
+            srcs = ["user_flags.fragment"],
+            visibility = ["//visibility:public"],
+        )
+        EOF
+
     - name: Build GKI (Bazel/Kleaf)
       run: |
-        tools/bazel run --config=fast //common:kernel_aarch64_dist -- --defconfig_fragment=common/user_flags.fragment
+        tools/bazel run --config=fast --defconfig_fragment=//common:user_flags.fragment //common:kernel_aarch64_dist
 
     - name: Upload GKI Artifacts
       uses: softprops/action-gh-release@v1
