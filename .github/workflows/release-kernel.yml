@@ -96,11 +96,6 @@ jobs:
       run: |
         repo init -u https://android.googlesource.com/kernel/manifest -b common-${{ inputs.kernel_ref }} --depth=1 --groups=default,-mips,-x86,-riscv
         repo sync -c -j$(nproc --all) --no-tags --no-clone-bundle
-
-    - name: Initialize `user_flags.fragment`
-      working-directory: common
-      run: |
-        touch user_flags.fragment
         
     - name: Apply KernelSU
       if: matrix.ksu != 'VNL'
@@ -144,7 +139,7 @@ jobs:
 
     - name: Build GKI (Bazel/Kleaf)
       run: |
-        tools/bazel run --config=fast --defconfig_fragment=common/user_flags.fragment //common:kernel_aarch64_dist
+        tools/bazel run --config=fast //common:kernel_aarch64_dist -- --defconfig_fragment=common/user_flags.fragment
 
     - name: Upload GKI Artifacts
       uses: softprops/action-gh-release@v1
