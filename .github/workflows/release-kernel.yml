@@ -205,7 +205,7 @@ jobs:
 
     - name: Build GKI (Bazel/Kleaf)
       run: |
-        tools/bazel run //common:kernel_aarch64_dist
+        tools/bazel run //common:kernel_aarch64_dist -- --nokleaf_skip_defconfig_check
 
     - name: Upload GKI Artifacts
       uses: softprops/action-gh-release@v1
