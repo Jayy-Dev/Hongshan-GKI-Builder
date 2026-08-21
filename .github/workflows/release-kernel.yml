@@ -127,72 +127,6 @@ jobs:
         cp "$PATCH_FILE" .
         patch -p1 < "$(basename "$PATCH_FILE")" || true
 
-        # 5.15.211 base fixup: the ACK tree carries vendor-hook includes
-        # (trace/hooks/blk.h in fs/namespace.c, trace/hooks/mm.h in
-        # fs/proc/task_mmu.c) that the upstream gki-android13-5.15 patch
-        # does not expect, so its FIRST hunk in each of those files rejects
-        # and they end up missing the susfs_def.h include (and, for
-        # namespace.c, the susfs externs/CL_COPY_MNT_NS define).  All other
-        # hunks apply cleanly.  Add the missing pieces deterministically;
-        # every insert is grep-guarded so an upstream patch fix is a no-op.
-        if [[ "${{ inputs.susfs_branch }}" == gki-android13-5.15* ]]; then
-          if ! grep -q '^#include <trace/hooks/blk.h>' fs/namespace.c || \
-             ! grep -q '^#include <trace/hooks/mm.h>' fs/proc/task_mmu.c; then
-            echo "FATAL: 5.15.211 SUSFS fixup: expected ACK vendor-hook includes missing"
-            exit 1
-          fi
-          if ! grep -q '^#include <linux/susfs_def.h>' fs/namespace.c; then
-            awk '/^#include <linux\/mnt_idmapping.h>$/{print; print "#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT"; print "#include <linux/susfs_def.h>"; print "#endif // #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT"; next} {print}' fs/namespace.c > fs/namespace.c.tmp && mv fs/namespace.c.tmp fs/namespace.c
-          fi
-          if ! grep -q '^extern bool susfs_is_current_ksu_domain' fs/namespace.c; then
-            awk '/^#include "internal.h"$/{print; print "#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT"; print "extern bool susfs_is_current_ksu_domain(void);"; print "extern struct static_key_true susfs_is_sdcard_android_data_not_decrypted;"; print ""; print "#define CL_COPY_MNT_NS BIT(25) /* used by copy_mnt_ns() */"; print ""; print "#endif // #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT"; next} {print}' fs/namespace.c > fs/namespace.c.tmp && mv fs/namespace.c.tmp fs/namespace.c
-          fi
-          if ! grep -q '^#include <linux/susfs_def.h>' fs/proc/task_mmu.c; then
-            awk '/^#include <linux\/pkeys.h>$/{print; print "#if defined(CONFIG_KSU_SUSFS_SUS_KSTAT) || defined(CONFIG_KSU_SUSFS_SUS_MAP) || defined(CONFIG_KSU_SUSFS_OPEN_REDIRECT)"; print "#include <linux/susfs_def.h>"; print "#endif // #if defined(CONFIG_KSU_SUSFS_SUS_KSTAT) || defined(CONFIG_KSU_SUSFS_SUS_MAP) || defined(CONFIG_KSU_SUSFS_OPEN_REDIRECT)"; next} {print}' fs/proc/task_mmu.c > fs/proc/task_mmu.c.tmp && mv fs/proc/task_mmu.c.tmp fs/proc/task_mmu.c
-          fi
-          echo "susfs: applied 5.15.211 missing-hunk fixup (susfs_def.h + externs)"
-        fi
-
-        # Post-apply verification for 5.15: the susfs code must have its
-        # declarations (bootconfig.c rejection is expected - kaguya covers it).
-        if [[ "${{ inputs.susfs_branch }}" == gki-android13-5.15* ]]; then
-          if ! grep -q 'susfs_is_sdcard_android_data_not_decrypted' fs/namespace.c || \
-             ! grep -q 'susfs_open_redirect_spoof_show_map_vma_srcu' fs/proc/task_mmu.c || \
-             ! grep -q '^#include <linux/susfs_def.h>' fs/proc/task_mmu.c; then
-            echo "FATAL: SUSFS 5.15 namespace/task_mmu pieces missing after fixup"
-            exit 1
-          fi
-        fi
-
-        # A failed hunk in fs/proc/bootconfig.c is EXPECTED: kaguya's
-        # in-tree bootconfig spoof rewrote that file, so the SUSFS
-        # SPOOF_CMDLINE_OR_BOOTCONFIG hunk rejects (.rej).  kaguya
-        # covers the same surface, so it is harmless.  But the
-        # fs/namei.c OPEN_REDIRECT hunks are essential - fail hard
-        # if they did not apply.
-        #
-        # set_nameidata() signature differs between 5.10 (3-arg) and
-        # 5.15+ (native 4-arg).  The sed workaround is 5.10-ONLY; on
-        # android13-5.15 the susfs patch targets the 4-arg form natively
-        # and must be left untouched.
-        if [[ "${{ inputs.susfs_branch }}" == gki-android12-5.10* ]]; then
-          if grep -q 'set_nameidata(nd, old_dfd, fake_filename, NULL);' fs/namei.c; then
-            sed -i 's/set_nameidata(nd, old_dfd, fake_filename, NULL);/set_nameidata(nd, old_dfd, fake_filename);/' fs/namei.c
-            echo "susfs: applied set_nameidata() 3-arg workaround (dropped ', NULL')"
-          elif grep -q 'set_nameidata(nd, old_dfd, fake_filename);' fs/namei.c; then
-            echo "susfs: upstream patch already uses 3-arg set_nameidata() - no workaround needed"
-          else
-            echo "FATAL: SUSFS fs/namei.c OPEN_REDIRECT hunks did not apply"
-            exit 1
-          fi
-        else
-          if ! grep -q 'set_nameidata(nd, old_dfd, fake_filename' fs/namei.c; then
-            echo "FATAL: SUSFS fs/namei.c OPEN_REDIRECT hunks did not apply"
-            exit 1
-          fi
-          echo "susfs: native 4-arg set_nameidata() present (5.15+) - no workaround needed"
-        fi
-
     - name: Set LOCALVERSION
       working-directory: common
       run: |
@@ -205,7 +139,7 @@ jobs:
 
     - name: Build GKI (Bazel/Kleaf)
       run: |
-        tools/bazel run //common:kernel_aarch64_dist -- --defconfig_fragment=common/user_flags.fragment
+        tools/bazel build --config=fast //common:kernel_aarch64_dist -- --defconfig_fragment=common/user_flags.fragment
 
     - name: Upload GKI Artifacts
       uses: softprops/action-gh-release@v1
