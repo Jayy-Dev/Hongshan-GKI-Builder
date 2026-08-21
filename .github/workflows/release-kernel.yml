@@ -1,4 +1,4 @@
-name: Build Kernel
+name: Build Kernel (Bazel/Kleaf)
 
 on:
   workflow_dispatch:
@@ -88,8 +88,9 @@ jobs:
 
     - name: Sync GKI Source
       run: |
-        mkdir kernel && cd kernel
-        repo init -u https://android.googlesource.com/kernel/manifest -b common-${{ inputs.kernel_ref }} --depth=1 --groups=default,-mips,-x86,-riscv repo sync -c -j$(nproc --all) --no-tags --no-clone-bundle
+        mkdir kernel && cd kernel \
+        repo init -u https://android.googlesource.com/kernel/manifest -b common-${{ inputs.kernel_ref }} --depth=1 --groups=default,-mips,-x86,-riscv \
+        repo sync -c -j$(nproc --all) --no-tags --no-clone-bundle
         
     - name: Apply KernelSU
       if: matrix.ksu != 'VNL'
@@ -198,12 +199,12 @@ jobs:
         printf '\nCONFIG_LOCALVERSION="%s"\n' "$LOCALVER" >> arch/arm64/configs/gki_defconfig
 
     - name: Build GKI (Bazel/Kleaf)
+      working-directory: kernel
       run: |
-        cd kernel \
         tools/bazel run //common:kernel_aarch64_dist
 
     - name: Upload GKI Artifacts
-      uses: softprops/action-gh-release@v1
+      uses: actions/upload-artifacts@v4
       with:
         files: |
           kernel/out/kernel_aarach64/dist/Image
