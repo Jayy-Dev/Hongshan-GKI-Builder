@@ -141,6 +141,28 @@ jobs:
           fi
         fi
 
+        # Fix fs/exec.c missing susfs include due to failed Hunk #1
+        if ! grep -q '#include <linux/susfs.h>' fs/exec.c; then
+          echo "Fixing fs/exec.c failed hunk..."
+          # Inject the susfs header include right after standard sched includes
+          awk '/^#include <linux\/sched\/task_stack.h>$/{print; print "#ifdef CONFIG_KSU_SUSFS"; print "#include <linux/susfs.h>"; print "#endif"; next} {print}' fs/exec.c > fs/exec.c.tmp && mv fs/exec.c.tmp fs/exec.c
+        fi
+
+        # Fix fs/proc/task_mmu.c missing susfs includes due to failed Hunk #4
+        if ! grep -q '#include <linux/susfs.h>' fs/proc/task_mmu.c; then
+          echo "Fixing fs/proc/task_mmu.c failed hunk..."
+          # Inject the susfs header include right after normal pkeys include block
+          awk '/^#include <linux\/pkeys.h>$/{print; print "#ifdef CONFIG_KSU_SUSFS"; print "#include <linux/susfs.h>"; print "#endif"; next} {print}' fs/proc/task_mmu.c > fs/proc/task_mmu.c.tmp && mv fs/proc/task_mmu.c.tmp fs/proc/task_mmu.c
+        fi
+
+        # Verification check to make sure the patches stuck
+        if ! grep -q '#include <linux/susfs.h>' fs/exec.c || ! grep -q '#include <linux/susfs.h>' fs/proc/task_mmu.c; then
+          echo "FATAL: Manual 6.12 kernel patch fixups failed to bind!"
+          exit 1
+        fi
+
+        echo "6.12 VFS fixups successfully attached."
+
     - name: Set LOCALVERSION
       working-directory: common
       run: |
