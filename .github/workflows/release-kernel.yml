@@ -103,10 +103,10 @@ jobs:
       run: |
         if [ "${{ matrix.ksu }}" = "KWS" ]; then
           curl -LSs "https://raw.githubusercontent.com/KOWX712/KernelSU/main/kernel/setup.sh" | bash -s master
-          printf '\nCONFIG_KSU=y\nCONFIG_KSU_MANUAL_SU=n\nCONFIG_KSU_SUSFS=n\n' >> arch/arm64/configs/gki_defconfig
+          printf '\nCONFIG_KSU=y\nCONFIG_KSU_MANUAL_SU=n\nCONFIG_KSU_SUSFS=n\n' >> user_flags.fragment
         else
           curl -LSs "https://raw.githubusercontent.com/pershoot/KernelSU-Next/dev-susfs/kernel/setup.sh" | bash -s dev-susfs
-          printf '\nCONFIG_KSU=y\nCONFIG_KSU_MANUAL_SU=n\nCONFIG_KSU_SUSFS=y\n' >> arch/arm64/configs/gki_defconfig
+          printf '\nCONFIG_KSU=y\nCONFIG_KSU_MANUAL_SU=n\nCONFIG_KSU_SUSFS=y\n' >> user_flags.fragment
         fi
 
     - name: Apply SUSFS patches (KSUN only)
@@ -201,11 +201,11 @@ jobs:
         # limit.  Full branding lives in the zip name / kernel.string.
         KN="$(echo "${{ inputs.kernel_name }}" | cut -c1-24 | sed 's/-$//')"
         LOCALVER="-${KN}-${{ matrix.ksu }}"
-        printf '\nCONFIG_LOCALVERSION="%s"\n' "$LOCALVER" >> arch/arm64/configs/gki_defconfig
+        printf '\nCONFIG_LOCALVERSION="%s"\n' "$LOCALVER" >> user_flags.fragment
 
     - name: Build GKI (Bazel/Kleaf)
       run: |
-        tools/bazel run //common:kernel_aarch64_dist -- --nokleaf_defconfig_check
+        tools/bazel run //common:kernel_aarch64_dist -- --defconfig_fragment=common/user_flags.fragment
 
     - name: Upload GKI Artifacts
       uses: softprops/action-gh-release@v1
