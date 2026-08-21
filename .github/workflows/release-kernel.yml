@@ -188,15 +188,14 @@ jobs:
 
     - name: Build GKI (Bazel/Kleaf)
       run: |
-        tools/bazel run --config=fast --defconfig_fragment=//common:user_flags.fragment //common:kernel_aarch64_dist
+        tools/bazel run --config=fast --defconfig_fragment=//common:user_flags.fragment //common:kernel_aarch64_dist -- --destdir=out
 
     - name: Upload GKI Artifacts
       uses: actions/upload-artifact@v4
       with:
         name: ${{ inputs.kernel_name }}-${{inputs.kernel_ref }}-${{inputs.ksu_variant}}
         path:
-          out/kernel_aarach64/dist/Image
-          out/kernel_aarach64/dist/*.ko
+          out/
         if-no-files-found: error
 
   
