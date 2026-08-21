@@ -127,6 +127,20 @@ jobs:
         cp "$PATCH_FILE" .
         patch -p1 < "$(basename "$PATCH_FILE")" || true
 
+        # 6.12 API fixup: getname_flags() signature changed from 3 args to 2 args.
+        # The SUSFS patch for gki-android16-6.12 still uses the old 3-argument form,
+        # causing compilation errors in fs/open.c
+        if [[ "${{ inputs.susfs_branch }}" == gki-android16-6.12* ]]; then
+          if grep -q 'getname_flags(filename, lookup_flags, NULL)' fs/open.c; then
+            sed -i 's/getname_flags(filename, lookup_flags, NULL)/getname_flags(filename, lookup_flags)/' fs/open.c
+            echo "susfs: applied getname_flags() 2-arg workaround for 6.12 (dropped ', NULL')"
+          elif grep -q 'getname_flags(filename, lookup_flags)' fs/open.c; then
+            echo "susfs: upstream patch already uses 2-arg getname_flags() - no workaround needed"
+          else
+            echo "WARNING: getname_flags() call not found in expected form in fs/open.c - manual review may be needed"
+          fi
+        fi
+
     - name: Set LOCALVERSION
       working-directory: common
       run: |
