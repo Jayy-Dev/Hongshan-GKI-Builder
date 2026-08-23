@@ -177,6 +177,7 @@ jobs:
         KN="$(echo "${{ inputs.kernel_name }}" | cut -c1-24 | sed 's/-$//')"
         LOCALVER="-${KN}-${{ matrix.ksu }}"
         printf '\nCONFIG_LOCALVERSION="%s"\n' "$LOCALVER" >> user_flags.fragment
+        printf '\nCONFIG_LOCALVERSION_AUTO=n' >> user_flags.fragment
 
     - name: Define Kernel Fragment
       working-directory: common
@@ -205,7 +206,7 @@ jobs:
 
     - name: Build GKI (Bazel/Kleaf)
       run: |
-        tools/bazel run --config=fast --defconfig_fragment=//common:user_flags.fragment //common:kernel_aarch64_dist -- --destdir=out
+        tools/bazel run --config=fast --config=release --defconfig_fragment=//common:user_flags.fragment //common:kernel_aarch64_dist -- --destdir=out
 
     - name: Package with AnyKernel3
       run: |
@@ -221,4 +222,3 @@ jobs:
       with:
         name: ${{ env.ZIP_NAME }}
         path: ${{ env.ZIP_NAME }}.zip
-        archive: false
