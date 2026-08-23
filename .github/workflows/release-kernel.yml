@@ -177,8 +177,6 @@ jobs:
         KN="$(echo "${{ inputs.kernel_name }}" | cut -c1-24 | sed 's/-$//')"
         LOCALVER="-${KN}-${{ matrix.ksu }}"
         printf '\nCONFIG_LOCALVERSION="%s"\n' "$LOCALVER" >> user_flags.fragment
-        # Added this to remove the -maybe-dirty in the localver
-        printf '\nCONFIG_LOCALVERSION_AUTO=n\n' >> user_flags.fragment
 
     - name: Define Kernel Fragment
       working-directory: common
@@ -191,6 +189,15 @@ jobs:
             visibility = ["//visibility:public"],
         )
         EOF
+
+    - name: Apply Nuke Dirty String Patch
+      working-directory: common
+      run: |
+       # Download the raw patch from the repository
+       curl -LO https://githubusercontent.com
+       
+       # Force apply the patch even if line spaces are slightly mismatched
+       git apply --ignore-space-change --ignore-whitespace 017.nuke_dirty_string.patch
 
     - name: Build GKI (Bazel/Kleaf)
       run: |
