@@ -190,14 +190,18 @@ jobs:
         )
         EOF
 
-    - name: Apply Nuke Dirty String Patch
-      working-directory: common
+    - name: Strip -maybe-dirty tag from build scripts
       run: |
-       # Download the raw patch from the repository
-       curl -LO https://raw.githubusercontent.com/ravindu644/Android-Kernel-Tutorials/refs/heads/main/patches/017.nuke_dirty_string.patch
-       
-       # Force apply the patch even if line spaces are slightly mismatched
-       git apply --ignore-space-change --ignore-whitespace 017.nuke_dirty_string.patch
+        cd common
+        # Remove dirty flags from the native script
+        if [ -f scripts/set_localversion ]; then
+          sed -i 's/-dirty//g' scripts/set_localversion
+          sed -i 's/-maybe-dirty//g' scripts/set_localversion
+        fi
+        # Android 16 Kleboda/Bazel wrapper scripts often override this too
+        find build/ -type f -exec sed -i 's/-dirty//g' {} + 2>/dev/null || true
+        find build/ -type f -exec sed -i 's/-maybe-dirty//g' {} + 2>/dev/null || true
+
 
     - name: Build GKI (Bazel/Kleaf)
       run: |
