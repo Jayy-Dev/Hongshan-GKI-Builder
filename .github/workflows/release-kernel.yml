@@ -199,7 +199,7 @@ jobs:
         ZIP_NAME="${{ inputs.kernel_name }}-${{ matrix.ksu }}"
         echo "ZIP_NAME=$ZIP_NAME" >> "$GITHUB_ENV"
         git clone --depth=1 --branch ${{ inputs.anykernel_branch }} https://github.com/Jayy-Dev/Hongshan-AnyKernel anykernel
-        cp out/dist/common/Image anykernel/Image
+        cp out/Image anykernel/Image
         cd anykernel
         zip -r9 "../${ZIP_NAME}.zip" . --exclude="*.git*" --exclude="README.md" --exclude="*.placeholder"
 
