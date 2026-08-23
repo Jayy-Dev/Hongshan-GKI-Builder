@@ -202,7 +202,23 @@ jobs:
         # Android 16 Kleboda/Bazel wrapper scripts often override this too
         find build/ -type f -exec sed -i 's/-dirty//g' {} + 2>/dev/null || true
         find build/ -type f -exec sed -i 's/-maybe-dirty//g' {} + 2>/dev/null || true
+    
+    - name: Download and Apply Nuke Dirty String Patch
+      run: |
+        # 1. Download the patch file to the root directory
+        curl -sL https://raw.githubusercontent.com/ravindu644/Android-Kernel-Tutorials/refs/heads/main/patches/017.nuke_dirty_string.patch -o nuke_dirty.patch
 
+        # 2. Rewrite paths to point specifically into your 'common' folder
+        sed -i 's|a/scripts/setlocalversion|a/common/scripts/setlocalversion|g' nuke_dirty.patch
+        sed -i 's|b/scripts/setlocalversion|b/common/scripts/setlocalversion|g' nuke_dirty.patch
+        sed -i 's|a/arch/arm64/configs/custom.config|a/common/arch/arm64/configs/custom.config|g' nuke_dirty.patch
+        sed -i 's|b/arch/arm64/configs/custom.config|b/common/arch/arm64/configs/custom.config|g' nuke_dirty.patch
+
+        # 3. Apply the patch from the workspace root (ignoring missing custom.config)
+        patch -p1 --reject-file=- < nuke_dirty.patch || true
+          
+        # 4. Clean up the downloaded patch file
+        rm nuke_dirty.patch
 
     - name: Build GKI (Bazel/Kleaf)
       run: |
