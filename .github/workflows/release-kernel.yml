@@ -177,6 +177,8 @@ jobs:
         KN="$(echo "${{ inputs.kernel_name }}" | cut -c1-24 | sed 's/-$//')"
         LOCALVER="-${KN}-${{ matrix.ksu }}"
         printf '\nCONFIG_LOCALVERSION="%s"\n' "$LOCALVER" >> user_flags.fragment
+        # Added this to remove the -maybe-dirty in the localver
+        printf '\nCONFIG_LOCALVERSION_AUTO=n\n' >> user_flags.fragment
 
     - name: Define Kernel Fragment
       working-directory: common
@@ -208,3 +210,4 @@ jobs:
       with:
         name: ${{ env.ZIP_NAME }}
         path: ${{ env.ZIP_NAME }}.zip
+        archive: false
