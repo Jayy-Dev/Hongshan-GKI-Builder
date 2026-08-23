@@ -194,7 +194,7 @@ jobs:
       working-directory: common
       run: |
        # Download the raw patch from the repository
-       curl -LO https://githubusercontent.com
+       curl -LO https://raw.githubusercontent.com/ravindu644/Android-Kernel-Tutorials/refs/heads/main/patches/017.nuke_dirty_string.patch
        
        # Force apply the patch even if line spaces are slightly mismatched
        git apply --ignore-space-change --ignore-whitespace 017.nuke_dirty_string.patch
