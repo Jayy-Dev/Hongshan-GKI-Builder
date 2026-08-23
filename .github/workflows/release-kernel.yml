@@ -24,6 +24,10 @@ on:
         description: 'SUSFS kernel patch branch (gki-android12-5.10 / gki-android16-6.12 ...)'
         type: string
         default: gki-android16-6.12
+      anykernel_branch:
+        description: 'AnyKernel3 installer branch (android16-6.12 = 6.12)'
+        type: string
+        default: android16-6.12
 
 jobs:
   setup:
@@ -190,12 +194,17 @@ jobs:
       run: |
         tools/bazel run --config=fast --defconfig_fragment=//common:user_flags.fragment //common:kernel_aarch64_dist -- --destdir=out
 
-    - name: Upload GKI Artifacts
+    - name: Package with AnyKernel3
+      run: |
+        ZIP_NAME="${{ inputs.kernel_name }}-${{ matrix.ksu }}"
+        echo "ZIP_NAME=$ZIP_NAME" >> "$GITHUB_ENV"
+        git clone --depth=1 --branch ${{ inputs.anykernel_branch }} https://github.com/Jayy-Dev/Hongshan-AnyKernel anykernel
+        cp out/dist/common/Image anykernel/Image
+        cd anykernel
+        zip -r9 "../${ZIP_NAME}.zip" . --exclude="*.git*" --exclude="README.md" --exclude="*.placeholder"
+
+    - name: Upload flashable zip
       uses: actions/upload-artifact@v4
       with:
-        name: ${{ inputs.kernel_name }}-${{inputs.kernel_ref }}-${{inputs.ksu_variant}}
-        path:
-          out/
-        if-no-files-found: error
-
-  
+        name: ${{ env.ZIP_NAME }}
+        path: ${{ env.ZIP_NAME }}.zip
